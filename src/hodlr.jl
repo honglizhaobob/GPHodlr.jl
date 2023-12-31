@@ -1414,6 +1414,41 @@ function Base.:+(A::Union{hodlr, hodlr_nonsymmetric}, B::Union{hodlr, hodlr_nons
     return C 
 end
 
+function Base.:+(A::hodlr, iden::UniformScaling{Float64})::hodlr
+    """Compute HODLR matrix + identity.
+
+    Args:
+        A : HODLR matrix 
+        iden : identity matrix or constant * identity matrix 
+
+    Returns:
+        A + iden. 
+    """
+
+    ret = deepcopy(A);
+    # Update the leaves 
+    for i = eachindex(ret.leaves)
+        ret.leaves[i] += iden;
+    end
+
+    return ret;
+end
+
+function Base.:+(iden::UniformScaling{Float64}, A::hodlr)::hodlr
+    """Compute HODLR matrix + identity.
+
+    Args:
+        iden : identity matrix or constant * identity matrix 
+        A : HODLR matrix 
+
+    Returns:
+        iden + A. 
+    """
+
+    return A + iden;
+end
+
+
 function Base.:*(A::hodlr, x::Union{Matrix{Float64}, Adjoint{Float64, Matrix{Float64}}})::Matrix{Float64}
     """Compute HODLR * dense matrix.
 
@@ -1476,6 +1511,23 @@ function Base.:*(x::Union{Matrix{Float64}, Adjoint{Float64, Matrix{Float64}}}, A
     return sol'
 end
 
+function Base.:*(D::Diagonal{Float64, Vector{Float64}}, A::Union{hodlr, hodlr_nonsymmetric})::Union{hodlr, hodlr_nonsymmetric}
+    """Compute Diagonal * HODLR matrix.
+
+    Args:
+        D : Diagonal matrix 
+        A : HODLR matrix
+
+    Returns:
+        A matrix = D * A.
+
+    """
+    ret = hodlr_transpose(deepcopy(A));
+    ret = hodlr_transpose(ret * D);
+
+    return ret
+end
+
 function Base.:*(A::Union{hodlr, hodlr_nonsymmetric}, B::Union{hodlr, hodlr_nonsymmetric}
     )::Union{hodlr, hodlr_nonsymmetric} 
     """HODLR matrix-matrix products. This operation can inflate off-diagonal ranks.
@@ -1512,6 +1564,162 @@ function Base.:*(A::Union{hodlr, hodlr_nonsymmetric}, B::Union{hodlr, hodlr_nons
 
     # Reconstruction of the output matrix 
     return block_hodlr_construction(C1, C2, U, V, Ul, Vl);
+end
+
+function Base.:\(
+    A::hodlr, 
+    B::Union{Vector{Float64}, Matrix{Float64}}
+)::Union{Vector{Float64}, Matrix{Float64}}
+    """Matrix linear system solve with HODLR LHS and general matrix RHS.
+
+    Args:
+        A : full-rank HODLR matrix. Need to be cautious about the condition number of A 
+        B : dense matrix as RHS 
+
+    Returns:
+        A^{-1} * B.
+    """
+    # Assertions 
+    @assert(A.col_idx_tree[end][end][end] == size(B, 1), "Dimension mismatches.")
+
+    # Factorization + solve 
+    A_fact = hodlr_factorize(A);
+    return hodlr_solve(A_fact, B);
+end
+
+function Base.:\(A_fact::hodlr_fact, B::Union{hodlr, hodlr_nonsymmetric})#::Union{hodlr, hodlr_nonsymmetric}
+    """Compute A / B as another nonsymmetric HODLR matrix.
+
+    Args:
+        A: factorization of HODLR matrix
+        B: symmetric or nonsymmetric HODLR matrices
+
+    Returns:
+        A / B as another nonsymmetric HODLR matrix.
+    """
+
+    max_level = A_fact.max_level;
+    # transpose the factorization to have form:
+    # A = (I+V1U1)*...*(I+VkUk)*blkdiag(A)
+    A_fact = hodlr_fact_transpose(A_fact);
+    # then A^-1 = blkdiag(A)^-1 * (I + VkUk)^-1 * ... * (I + V1U1)^-1
+
+    # Sequential applications 
+    ret = deepcopy(B);
+    for lvl = 1:max_level
+        if lvl == 1
+            tmp_U = A_fact.U[lvl][1];
+            tmp_V = A_fact.V[lvl][1];
+            new_V = ((I + tmp_V' * tmp_U) \ (tmp_V' * ret))';
+            new_V = Matrix{Float64}(new_V);
+
+            ret = hodlr_plus_lowrank(ret, -tmp_U, new_V)
+
+            continue
+        end
+
+        # Other levels 
+        # Generate the modified diagonal blocks for the finest level 
+        tmp_diag = [];
+        for i = 1:2^(lvl - 1)
+            # Update the diagonal blocks 
+            diag_block = hodlr_truncate(ret, lvl - 1, i);
+            tmp_U = A_fact.U[lvl][i];
+            tmp_V = A_fact.V[lvl][i];
+            new_V = ((I + tmp_V' * tmp_U) \ (tmp_V' * diag_block))';
+            new_V = Matrix{Float64}(new_V);
+            diag_block = hodlr_plus_lowrank(diag_block, -tmp_U, new_V)
+
+            push!(tmp_diag, diag_block);
+        end
+
+        # Sequentially merge to reconstruct the HODLR matrix 
+        for i = lvl - 1:-1:1
+            tmp_off_diag_l = [];
+            tmp_off_diag_r = [];
+            for j = 1:2^(i - 1)
+                push!(tmp_off_diag_l, ret.U[i][j]);
+                push!(tmp_off_diag_l, ret.Ul[i][j]);
+                push!(tmp_off_diag_r, ret.V[i][j]);
+                push!(tmp_off_diag_r, ret.Vl[i][j]);
+            end
+
+            # Update the off-diagonal low-rank factors 
+            # @show size(A_fact.U[i + 1][1]), A_fact.U[i + 1][1][1:10,1:10];
+            tmp_off_diag_l = block_inv_update(tmp_off_diag_l, A_fact.U[lvl], A_fact.V[lvl]);
+            tmp_off_diag_r = tmp_off_diag_r;
+
+            # Merge with the diagonal blocks 
+            new_tmp_diag = [];
+            for j = 1:2^(i - 1)
+                diag1 = tmp_diag[(j - 1) * 2 + 1];
+                diag2 = tmp_diag[(j - 1) * 2 + 2];
+
+                tmp_U = tmp_off_diag_l[(j - 1) * 2 + 1];
+                tmp_Ul = tmp_off_diag_l[(j - 1) * 2 + 2];
+                tmp_V = tmp_off_diag_r[(j - 1) * 2 + 1];
+                tmp_Vl = tmp_off_diag_r[(j - 1) * 2 + 2];
+
+                tmp = block_hodlr_construction(diag1, diag2, tmp_U, tmp_V, tmp_Ul, tmp_Vl);
+                push!(new_tmp_diag, tmp);
+            end
+
+            # Update tmp_diag
+            tmp_diag = new_tmp_diag;
+        end
+
+        # Update ret 
+        ret = deepcopy(tmp_diag[1]);
+
+        @assert(length(tmp_diag) == 1, "Something is wrong.")
+    end
+
+    # Applications of the leaf level diagonal blocks 
+    for i = 1:length(ret.leaves)
+        ret.leaves[i] = A_fact.leaves[i] \ ret.leaves[i];
+    end
+    for i = 1:max_level
+        tmp_off_diag_l = [];
+        tmp_off_diag_r = [];
+        for j = 1:2^(i - 1)
+            push!(tmp_off_diag_l, ret.U[i][j]);
+            push!(tmp_off_diag_l, ret.Ul[i][j]);
+            push!(tmp_off_diag_r, ret.V[i][j]);
+            push!(tmp_off_diag_r, ret.Vl[i][j]);
+        end
+
+        # Update the off-diagonal low-rank factors 
+        tmp_off_diag_l = block_inv_update2(tmp_off_diag_l, A_fact.leaves);
+        tmp_off_diag_r = tmp_off_diag_r;
+
+        # Write them back 
+        for j = 1:2^(i - 1)
+            ret.U[i][j] = tmp_off_diag_l[(j - 1) * 2 + 1];
+            ret.Ul[i][j] = tmp_off_diag_l[(j - 1) * 2 + 2];
+            ret.V[i][j] = tmp_off_diag_r[(j - 1) * 2 + 1];
+            ret.Vl[i][j] = tmp_off_diag_r[(j - 1) * 2 + 2];
+        end
+    end
+
+    return ret 
+end
+
+function Base.:\(A::hodlr, B::Union{hodlr, hodlr_nonsymmetric})#::Union{hodlr, hodlr_nonsymmetric}
+    """Compute A / B as another nonsymmetric HODLR matrix.
+
+    Args:
+        A: HODLR matrix
+        B: symmetric or nonsymmetric HODLR matrices
+
+    Returns:
+        A / B as another nonsymmetric HODLR matrix.
+    """
+
+    # transpose the factorization to have form:
+    # A = (I+V1U1)*...*(I+VkUk)*blkdiag(A)
+    A_fact = hodlr_factorize(A);
+    
+    return A_fact \ B;
 end
 
 ############################################################################################
@@ -1682,6 +1890,29 @@ function hodlr_plus_lowrank(A::Union{hodlr, hodlr_nonsymmetric, Matrix{Float64}}
     return output;
 end
 
+function hodlr_plus_diagonal(
+    A::hodlr,
+    d::Vector{Float64}
+)::hodlr
+    """Add a diagonal matrix to HODLR matrix.
+
+    Args:
+        A: HODLR matrix to work with 
+        d: diagonal entries as a vector added to the HODLR matrix 
+
+    Returns:
+        hodlr matrix = A + Diagonal(d).
+    """
+    # Update the leaves 
+    leaves = deepcopy(A.leaves);
+    for i = eachindex(leaves)
+        idx = A.idx_tree[end][i];
+        leaves[i] += Diagonal(d[idx]);
+    end
+
+    return hodlr(A.max_level, leaves, deepcopy(A.U), deepcopy(A.V), deepcopy(A.idx_tree));
+end
+
 function rank(A::Union{hodlr, hodlr_nonsymmetric})::Vector{Vector{Int}}
     """Returns the rank of the nonsymmetric HODLR off-diagonal blocks for each level.
     Args:
@@ -1704,6 +1935,33 @@ function rank(A::Union{hodlr, hodlr_nonsymmetric})::Vector{Vector{Int}}
     end
     
     return ret
+end
+
+function Base.size(
+    A::Union{hodlr, hodlr_nonsymmetric},
+    dims::Union{Nothing, Int64}=nothing
+)::Union{Int64, Tuple}
+    """Returns the size of HODLR matrix
+
+    Args:
+        A : nonsymmetric HODLR or symmetric HODLR matrix to work with
+        dims: dimension of the size to return 
+
+    Returns:
+        Int64 if typeof(dims) == Int64, Tuple if dims === nothing
+    """
+    
+    row_dim, col_dim = A.row_idx_tree[1][end][end], A.col_idx_tree[1][end][end];
+    
+    if dims === nothing
+        return (row_dim, col_dim)
+    elseif typeof(dims) == Int64 
+        @assert(dims == 1 || dims == 2, "HODLR matrices only have two dimensions.")
+
+        return dims == 1 ? row_dim : col_dim;
+    else
+        error("Input type not supported.")
+    end
 end
 
 function block_hodlr_construction(
@@ -1848,3 +2106,117 @@ function block_hodlr_construction(
 
     return output
 end
+
+function hodlr_transpose(A::Union{hodlr, hodlr_nonsymmetric})::Union{hodlr, hodlr_nonsymmetric}
+    """Take transpose of the given HODLR or nonsymmetric HODLR matrix.
+
+    Args:
+        A: HODLR or nonsymmetric HODLR matrix
+
+    Returns:
+        A.'
+    """
+    if typeof(A) == hodlr_nonsymmetric
+        return hodlr_nonsymmetric(
+            A.max_level, 
+            [Matrix{Float64}(transpose(A.leaves[i])) for i = eachindex(A.leaves)], 
+            A.Vl, 
+            A.Ul, 
+            A.V, 
+            A.U, 
+            A.col_idx_tree, 
+            A.row_idx_tree);
+    elseif typeof(A) == hodlr
+        return hodlr(
+            A.max_level, 
+            [Matrix{Float64}(transpose(A.leaves[i])) for i = eachindex(A.leaves)], 
+            A.Vl, 
+            A.Ul, 
+            A.V, 
+            A.U, 
+            A.col_idx_tree, 
+            A.row_idx_tree);
+    else
+        throw(TypeError("Matrix type not supported."))
+    end
+end
+
+function hodlr_eye(template::hodlr)::hodlr
+    """Create an identity matrix in HODLR format.
+
+    Args:
+        template: template HODLR matrix, the identity matrix follows the same idx_tree
+
+    Returns:
+        hodlr identity matrix.
+    """
+
+    idx_tree = deepcopy(template.idx_tree);
+    leaves = deepcopy(template.leaves);
+    U, V = deepcopy(template.U), deepcopy(template.V);
+    # Update the leaves
+    for i = eachindex(leaves)
+        leaves[i] = Diagonal(ones(size(leaves[i], 1)));
+    end
+
+    # Update the off-diagonal blocks 
+    for lvl = 1:template.max_level
+        for i = eachindex(U[lvl])
+            U[lvl][i] = zeros(size(U[lvl][i], 1), 1);
+            V[lvl][i] = zeros(size(V[lvl][i], 1), 1);
+        end
+    end
+
+    return hodlr(template.max_level, leaves, U, V, idx_tree);
+end
+
+function hodlr_diag(A::hodlr)::Vector{Float64}
+    """Extract the diagonal of an HODLR matrix.
+
+    Args:
+        A: HODLR matrix 
+
+    Returns:
+        Vector containing the diagonal of the HODLR matrix.
+    """
+    tmp = [];
+    for i = eachindex(A.leaves)
+        push!(tmp, diag(A.leaves[i]))
+    end
+
+    return vcat(tmp...);
+end
+
+function hodlr_rank_heatmap(A::Union{hodlr, hodlr_nonsymmetric})
+    """Plot the rank heatmap of the given HODLR matrix.
+
+    Args:
+        A: HODLR matrix to examine
+
+    Returns:
+        Plot of the heatmap of the rank.
+    """
+    tmp_rank = rank(A);
+    row_sz, col_sz = A.row_idx_tree[1][2][end], A.col_idx_tree[1][2][end];
+    ret = zeros(row_sz, col_sz);
+    for lvl = 1:A.max_level
+        for i = 1:2^(lvl - 1)
+            row_idx, col_idx = A.row_idx_tree[lvl][2 * (i - 1) + 1], A.col_idx_tree[lvl][2 * i];
+            ret[row_idx, col_idx] .= ones(size(ret[row_idx, col_idx])) * tmp_rank[lvl][2 * (i - 1) + 1];
+
+            row_idx, col_idx = A.row_idx_tree[lvl][2 * i], A.col_idx_tree[lvl][2 * (i - 1) + 1];
+            ret[row_idx, col_idx] .= ones(size(ret[row_idx, col_idx])) * tmp_rank[lvl][2 * i];
+        end
+    end
+
+    # Leaves 
+    for i = eachindex(A.leaves)
+        row_idx, col_idx = A.row_idx_tree[end][i], A.col_idx_tree[end][i];
+        ret[row_idx, col_idx] .= ones(size(ret[row_idx, col_idx])) * minimum(size(ret[row_idx, col_idx]));
+    end
+
+    p = heatmap(ret, yflip=true, c=:darkrainbow);
+
+    return p;
+end
+

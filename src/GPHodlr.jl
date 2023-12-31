@@ -24,5 +24,6 @@ module GPHodlr
     # export a few helper functions (so can be used in unit tests)
     export dyadic_idx, dyadic_merge
     export randn_symmetric
+    export Random
 
 end
