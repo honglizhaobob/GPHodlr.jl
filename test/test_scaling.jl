@@ -2,7 +2,7 @@
 # for a long time and are not suitable for unit tests.
 
 ### COME BACK LATER
-
+error("runs for a long time");
 ##########
 # Test 1: HODLR construction
 ##########
