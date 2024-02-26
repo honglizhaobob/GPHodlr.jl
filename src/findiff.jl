@@ -7,11 +7,6 @@
 
 # Ferrite: https://github.com/Ferrite-FEM/Ferrite.jl
 
-using LinearAlgebra
-using BlockArrays
-using SparseArrays
-using ForwardDiff
-
 ############################################################################################
 # 1d Advection-diffusion-reaction
 ############################################################################################

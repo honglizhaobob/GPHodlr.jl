@@ -3,10 +3,6 @@
 
 # Some good practices
 # - dealing with unwanted adjoints: https://discourse.julialang.org/t/best-practices-regarding-adjoint-when-should-it-be-used-instead-of-array-best-way-to-style-it-out/43525
-using Statistics
-using LinearAlgebra
-using Random
-using BlockDiagonals
 
 import LinearAlgebra: rank
 

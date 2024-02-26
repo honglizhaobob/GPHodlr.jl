@@ -20,12 +20,6 @@
     ]
 """
 
-using Statistics, Distributions, GaussianRandomFields
-using NLsolve, Optim
-using SparseArrays
-using ForwardDiff
-using Polynomials, SpecialPolynomials
-
 ######################################################################
 # Velocity models
 ######################################################################

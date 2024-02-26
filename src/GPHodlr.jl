@@ -17,12 +17,17 @@ module GPHodlr
     # sparse linear algebra 
     using SparseArrays
 
+    # global polynomials 
+    using Polynomials, SpecialPolynomials, QuadGK
+
+    # JLD 
+    using JLD 
+
     # autodifferentiation
     using ForwardDiff
 
     # for nonlinear optimization 
     using NLsolve, Optim
-
 
     # user-defined helpers
 

@@ -17,10 +17,6 @@
     anomaly readings. The `NaN` values represent land locations.
 
 """
-# import packages
-using JLD
-using LinearAlgebra
-
 struct SSTPartition
     """ 
         An immutable struct holding a block of the 
