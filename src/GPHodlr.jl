@@ -5,14 +5,24 @@ module GPHodlr
     # for random sampling
     using Random, Statistics
 
+    # for probability distributions 
+    using Distributions, GaussianRandomFields
+
     # linear algebra
     using LinearAlgebra
 
     # block wise linear algebra
     using BlockDiagonals, BlockArrays
 
+    # sparse linear algebra 
+    using SparseArrays
+
     # autodifferentiation
     using ForwardDiff
+
+    # for nonlinear optimization 
+    using NLsolve, Optim
+
 
     # user-defined helpers
 
@@ -20,6 +30,11 @@ module GPHodlr
     include("rsvd.jl")        # randomized matrix decompositions
     include("hodlr.jl")       # main routines defining HODLR operations 
     include("findiff.jl")     # main routines defining finite difference matrices
+    include("Preprocess.jl");
+    include("PhysicsMLE.jl");
+    include("PhysicsMLE1d.jl");
+    include("LargeScalePhysicsMLE.jl");
+
     # todo                    # main routines defining finite elements
 
 
