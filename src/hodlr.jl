@@ -10,10 +10,6 @@ using BlockDiagonals
 
 import LinearAlgebra: rank
 
-include("./dyadic_idx.jl");
-include("./rsvd.jl");
-
-
 # !!!!!! may want to stop using mutable struct, weird inaccuracies 
 # may occur when fields get mutated.
 ############################################################################################

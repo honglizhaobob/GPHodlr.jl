@@ -2,6 +2,7 @@ using GPHodlr
 include("basic_hodlr_accuracy_helpers.jl");
 using BlockDiagonals
 using LinearAlgebra
+using Test
 
 
 @testset begin

@@ -1,7 +1,7 @@
 using GPHodlr
 using BlockDiagonals
 using LinearAlgebra
-
+using Test
 
 # include helper functions
 include("basic_hodlr_accuracy_helpers.jl");
