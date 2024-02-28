@@ -1,4 +1,4 @@
-""" 
+#=
     (03/16/2023) 
     Helper functions to perform (parallelized) maximum likelihood 
     estimation of a physics-based model for Gaussian processes. 
@@ -51,7 +51,9 @@
         ∂/∂θ₁ = ∂/∂v₁⋅∂v₁/∂θ₁
         ∂/∂θ₂ = ∂/∂v₂⋅∂v₂/∂θ₂
     instead of looping and computing each value.
-"""
+=#
+
+include("VelocityModels.jl");
 ########################################################################
 # function solve(MLEProblem) => does optimization and returns best parameters
 ########################################################################
