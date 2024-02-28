@@ -36,10 +36,11 @@ module GPHodlr
     include("hodlr.jl")       # main routines defining HODLR operations 
     include("findiff.jl")     # main routines defining finite difference matrices
     include("Preprocess.jl");
+    include("VelocityModels.jl");
     include("PhysicsMLE.jl");
     #include("PhysicsMLE1d.jl");
     #include("LargeScalePhysicsMLE.jl");
-    include("VelocityModels.jl");
+    
 
     # todo                    # main routines defining finite elements
 

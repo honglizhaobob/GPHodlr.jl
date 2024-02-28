@@ -52,8 +52,6 @@
         ∂/∂θ₂ = ∂/∂v₂⋅∂v₂/∂θ₂
     instead of looping and computing each value.
 =#
-
-include("VelocityModels.jl");
 ########################################################################
 # function solve(MLEProblem) => does optimization and returns best parameters
 ########################################################################

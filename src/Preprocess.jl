@@ -282,23 +282,6 @@ function subsampling(nx :: Int64, ny :: Int64, observed_idx :: Vector{Int64})
 end
 
 
-
-function sub2ind(arr_size, i, j)
-    """
-        Implementation of `sub2ind` functionality
-        from MATLAB.
-
-        Inputs:
-            arr_size :: Tuple{Int, Int} -> size of the array being
-                                        linearized (column-wise).
-            i, j     :: Int             -> Cartesian index to be
-                                        converted to linear index.
-        Output:
-            idx      :: Int             -> linearized Cartesian index.
-    """
-    return LinearIndices(arr_size)[CartesianIndex.(i, j)]
-end
-
 function ind2sub(arr_size, lin_idx)
     """
         Converts a linearized index into Cartesian indices.
