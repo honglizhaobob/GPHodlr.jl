@@ -18,7 +18,7 @@ module GPHodlr
     using SparseArrays
 
     # global polynomials 
-    using Polynomials, SpecialPolynomials, QuadGK
+    using Polynomials, SpecialPolynomials, QuadGK, FastGaussQuadrature
 
     # JLD 
     using JLD 
