@@ -22,8 +22,21 @@
 ######################################################################
 # Velocity models
 ######################################################################
+
+# Define a separate module 
+module PhysicsMLE1d
+
+# import other packages 
+using GaussianRandomFields
+using SpecialFunctions, Polynomials, SpecialPolynomials
+using LinearAlgebra
+using Random, Statistics
+using SparseArrays
+using Optim
+
+##########
 abstract type VelocityModel1d end
-mutable struct ChebyshevVelocity{T <: AbstractFloat} <: VelocityModel1d
+mutable struct ChebyshevVelocity1d{T <: AbstractFloat} <: VelocityModel1d
     """
         Evaluable 1d velocity field with Chebyshev expansion.
     """
@@ -35,7 +48,7 @@ mutable struct ChebyshevVelocity{T <: AbstractFloat} <: VelocityModel1d
 
 end
 
-mutable struct CustomVelocity{T <: AbstractFloat} <: VelocityModel1d
+mutable struct CustomVelocity1d{T <: AbstractFloat} <: VelocityModel1d
     """
         Model wrapper for an analytic function in 1d.
     """
@@ -46,7 +59,7 @@ mutable struct CustomVelocity{T <: AbstractFloat} <: VelocityModel1d
     model :: Function
 end
 
-function (v :: ChebyshevVelocity)(x :: T) where T <: AbstractFloat
+function (v :: ChebyshevVelocity1d)(x :: T) where T <: AbstractFloat
     """ 
         Evaluable method for `ChebyshevVelocity` model. 
 
@@ -74,13 +87,13 @@ function (v :: ChebyshevVelocity)(x :: T) where T <: AbstractFloat
     # shifted Chebyshev polynomials
     y1 = (2 * x-(v.xmax + v.xmin)) / (v.xmax - v.xmin);
 
-    res = Chebyshev(tmp)(y1);
+    res = ChebyshevT(tmp)(y1);
 
     return res
 end
 
 
-function (v :: CustomVelocity)(x :: T) where T <: AbstractFloat
+function (v :: CustomVelocity1d)(x :: T) where T <: AbstractFloat
     """
         Wrapper for known velocity model. 
     """
@@ -89,7 +102,7 @@ end
 
 ##
 
-function ∂v∂θ(v_model :: ChebyshevVelocity, x :: T) where T <: AbstractFloat
+function ∂v∂θ(v_model :: ChebyshevVelocity1d, x :: T) where T <: AbstractFloat
     p = length(v_model.theta);
 
     # evalute gradient with respect to each parameters
@@ -533,7 +546,7 @@ end
 ######################################################################
 # MLE problem in 1d
 ######################################################################
-mutable struct MLEProblem
+mutable struct MLEProblem1d
     """
         A maximum likelihood problem defined on a set of data, 
         defined in 1d, working mostly with synthetic data.
@@ -568,7 +581,7 @@ mutable struct MLEProblem
     # reaction 
     c :: Float64
 
-    function MLEProblem(
+    function MLEProblem1d(
         xgrid :: Vector{Float64}, 
         u_observed :: Vector{Float64},
         obs_local_inds :: Vector{Int64},
@@ -602,14 +615,14 @@ mutable struct MLEProblem
 end
 
 ## Wrapped covariance evaluation functions
-function M(prob :: MLEProblem)
+function M(prob :: MLEProblem1d)
     # apply covariance function
     sigma_phi = prob.covfunc.cov.σ;
     M = (sigma_phi^2).*apply(prob.covfunc, prob.xgrid);
     return M;
 end
 
-function L(prob :: MLEProblem)
+function L(prob :: MLEProblem1d)
     return advection_diffusion_reaction_homogeneous_neumann1d(
         prob.xgrid, 
         prob.kappa,
@@ -823,7 +836,7 @@ end
 
 ## Solving MLE problem
 function solve!(
-    prob :: MLEProblem,
+    prob :: MLEProblem1d,
     param_constraints :: Matrix{Float64}
 )
     """
@@ -856,7 +869,7 @@ function solve!(
 
         # compute score first
         # ----------------------------------------
-        # Score (only those in `update_manual`)
+        # Score 
         # ----------------------------------------
         if G !== nothing
             # result vector
@@ -927,7 +940,7 @@ function solve!(
     return _optimizer_result;
 end
 
-function dump_pde_parameters(prob :: MLEProblem)
+function dump_pde_parameters(prob :: MLEProblem1d)
     """
         Collects PDE parameters in a vector.
     """
@@ -940,7 +953,7 @@ function dump_pde_parameters(prob :: MLEProblem)
     return theta;
 end
 
-function update!(prob :: MLEProblem, theta :: Vector)
+function update!(prob :: MLEProblem1d, theta :: Vector)
     """
         Updates PDE parameters stored in MLE problem.
     """
@@ -977,4 +990,120 @@ function imputation_statistics(prob)
         K_hidhid - K_hidobs*(K_obsobs\K_hidobs')
     );
     return u_hid_mean, u_hid_cov;
+end
+
+
+## other helpers
+function generate_samples(
+        n :: Int, 
+        x_min :: Float64, 
+        x_max :: Float64, 
+        mean_fn :: Function,
+        matern_params :: Union{Vector, Matrix},
+        pde_params :: Union{Vector, Matrix},
+        v :: Any,
+        θ_true :: Union{Matrix, Vector},
+        nmc :: Int,
+        sampling_strategy :: String,
+        nugget_level :: Float64,
+        verbose :: Bool
+    )
+    """ 
+        Sample from the physical model given by 
+        inverting the discretized ARD 1d operator
+        on Matérn latent Gaussian process as forcing
+        term.
+
+        Inputs: 
+            n               Number of spatial grid points.
+
+            x_min, x_max    Boundary of the observed process
+
+            mean_fn         A vectorized evaluation procedure 
+                            that returns the mean function.
+
+            matern_params   parameters for the Matern process generation.
+
+            pde_params      static parameters for the ADR operator. Not including
+                            advection.
+
+            v               an evaluation procedure for advection velocity
+                            at a grid point, with a set of parameters.
+                            Should be of form `v(x, θ)`
+
+            θ_true          An array of parametric inputs for the advection velocity.
+                            Can either contain values or be empty. If empty,
+                            the problem case does not have a ground truth (i.e.
+                            model is being inferred). E.g. the true model can 
+                            be 2*cos(x), but we are interpolating it 
+                            using Chebyshev basis.
+
+            nmc             number of observations.
+
+            sampling_strategy 
+                            A string to indicate how latent samples 
+                            are generated. Currently supports:
+                            `Cholesky` and `CirculantEmbedding`.
+
+            nugget_level    A float representing the Tikhonov regularization
+                            strength we are adding to our sampled observations.
+                            The nugget level represents a proportion of 
+                            observed standard deviation.
+            
+            verbose         If `true`, prints additional information 
+                            such as sampling and solution progress.
+    """
+    @assert length(matern_params) == 3
+    pts = range(x_min, x_max, length=n);
+    # evaluate mean function
+    mf = mean_fn(pts);
+    # unpack Matern process parameters
+    sigma_phi, nu, l = matern_params;
+    # unpack differential parameters
+    kappa, c = pde_params;
+    # spatial grid size
+    h = pts[2] - pts[1];
+    # get Matern covariance matrix
+    covfunc = CovarianceFunction(1, Matern(l, nu, σ=sigma_phi));
+    M = (sigma_phi^2).*Matrix(apply(covfunc, pts));
+    # generate latent process
+    if sampling_strategy == "Cholesky"
+        M_chol = LinearAlgebra.cholesky(M).U;
+        phi = zeros(nmc, n);
+        for i = 1:nmc
+            phi[i, :] .= M_chol'*randn(n) .+ mf;
+        end
+    elseif sampling_strategy == "CirculantEmbedding"
+        # Gaussian random field object
+        grf = GaussianRandomField(mf, covfunc, CirculantEmbedding(), pts);
+        phi = zeros(nmc, n);
+        for i = 1:nmc
+            phi[i, :] .= sample(grf);
+        end
+    else
+        error("Not Implemented! ")
+    end
+    # get discretized operator
+    L = advection_diffusion_reaction_homogeneous_neumann1d(collect(pts), kappa, v, c);
+    # solve for observations
+    u = zeros(nmc, n);
+    for i = 1:nmc
+        u[i, :] = L\phi[i, :];
+    end
+    # after generating samples, add nugget
+    σᵤ = nugget_level * std(u);
+    for i = 1:nmc
+        if verbose
+            if i % 10 == 0
+                println("Generating sample with nugget: $i\n")
+            end
+        end
+        u[i, :] .= u[i, :] .+ σᵤ.*randn(n);
+    end
+    return u, M, σᵤ;
+end
+
+########## end module
+
+
 end

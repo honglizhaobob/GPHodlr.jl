@@ -18,7 +18,8 @@ module GPHodlr
     using SparseArrays
 
     # global polynomials 
-    using Polynomials, SpecialPolynomials, QuadGK, FastGaussQuadrature
+    using FastGaussQuadrature
+    using Polynomials, SpecialPolynomials, QuadGK
 
     # JLD 
     using JLD 
@@ -29,6 +30,10 @@ module GPHodlr
     # for nonlinear optimization 
     using NLsolve, Optim
 
+    # 1d physics based module for testing
+    include("PhysicsMLE1d.jl");
+    using .PhysicsMLE1d
+
     # user-defined helpers
 
     include("dyadic_idx.jl")  # creating indices that are powers of 2 (for dividing domain into halves)
@@ -38,7 +43,6 @@ module GPHodlr
     include("Preprocess.jl");
     include("VelocityModels.jl");
     include("PhysicsMLE.jl");
-    #include("PhysicsMLE1d.jl");
     #include("LargeScalePhysicsMLE.jl");
     
 
