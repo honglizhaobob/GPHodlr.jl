@@ -75,8 +75,8 @@ function (v :: ChebyshevVelocity1d)(x :: T) where T <: AbstractFloat
     # rescale coefficients such that bases are orthonormal
     tmp = ones(T, p);
     # adjust for built-in normalization constant
-    tmp[1] = tmp[1] ./ sqrt(pi);
-    tmp[2:end] .= tmp[2:end] ./ sqrt(pi ./ 2);
+    #tmp[1] = tmp[1] ./ sqrt(pi);
+    #tmp[2:end] .= tmp[2:end] ./ sqrt(pi ./ 2);
 
     # adjust for domain shifting 
     tmp[:] .= tmp[:] .* sqrt(2 ./ (v.xmax .- v.xmin));
@@ -87,7 +87,7 @@ function (v :: ChebyshevVelocity1d)(x :: T) where T <: AbstractFloat
     # shifted Chebyshev polynomials
     y1 = (2 * x-(v.xmax + v.xmin)) / (v.xmax - v.xmin);
 
-    res = ChebyshevT(tmp)(y1);
+    res = Chebyshev(tmp)(y1);
 
     return res
 end
@@ -112,9 +112,9 @@ function ∂v∂θ(v_model :: ChebyshevVelocity1d, x :: T) where T <: AbstractFl
     y1 = (2 * x -(v_model.xmax+v_model.xmin)) / (v_model.xmax - v_model.xmin);
     for i = 1:p
         if i == 1
-            res_grad[i] = sqrt(2 ./ (v_model.xmax .- v_model.xmin)) .* basis(Chebyshev, i-1)(y1) ./ sqrt(pi);
+            res_grad[i] = sqrt(2 ./ (v_model.xmax .- v_model.xmin)) .* basis(Chebyshev, i-1)(y1); # ./ sqrt(pi);
         else
-            res_grad[i] = sqrt(2 ./ (v_model.xmax .- v_model.xmin)) .* basis(Chebyshev, i-1)(y1) ./ sqrt(pi ./ 2);
+            res_grad[i] = sqrt(2 ./ (v_model.xmax .- v_model.xmin)) .* basis(Chebyshev, i-1)(y1);# ./ sqrt(pi ./ 2);
         end
     end
 
@@ -126,7 +126,7 @@ end
 # Differential operators evaluation
 ######################################################################
 function advection_diffusion_reaction_homogeneous_neumann1d(
-    gridpts :: Vector{T}, 
+    gridpts :: Any, 
     kappa :: T, 
     v_model :: VelocityModel1d, 
     c :: T
@@ -190,71 +190,71 @@ function advection_diffusion_reaction_homogeneous_neumann1d(
     return L;
 end
 
-function advection_diffusion_reaction_homogeneous_neumann1d(
-    gridpts, 
-    kappa :: T, 
-    v_model, 
-    v_params,
-    c :: T
-) where T
-    """ 
-        Underlying implementation of discretized PDE operator given 
-        diffusivity, reaction and velocity parameters.
-    """
-    gridpts = convert(Vector, gridpts);
-    n = length(gridpts);
-    h = gridpts[2] - gridpts[1];
-    row_ind = Vector{Int64}();
-    col_ind = Vector{Int64}();
-    entry = Vector{Float64}();
-    for i = 1:n
-        # grid location
-        x = gridpts[i];
-        # advection velocity
-        v_val = v_model(x, v_params);
-        # compute coefficients
-        # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-        a1 = (-v_val/2h-kappa/h^2);
-        a2 = (c+2kappa/h^2);
-        a3 = (v_val/2h-kappa/h^2);
-        # store coefficients
-        if i == 1
-            # U_i 
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-            # U_i+1
-            push!(row_ind, i);
-            push!(col_ind, i+1);
-            push!(entry, a1+a3);
-        elseif i == n
-            # U_i-1
-            push!(row_ind, i);
-            push!(col_ind, i-1);
-            push!(entry, a1+a3);
-            # U_i
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-        else
-            # U_i-1
-            push!(row_ind, i);
-            push!(col_ind, i-1);
-            push!(entry, a1);
-            # U_i 
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-            # U_i+1
-            push!(row_ind, i);
-            push!(col_ind, i+1);
-            push!(entry, a3);
-        end
-    end
-    # create differential operator as a matrix
-    L = sparse(row_ind, col_ind, entry);
-    return L;
-end
+# function advection_diffusion_reaction_homogeneous_neumann1d(
+#     gridpts, 
+#     kappa :: T, 
+#     v_model, 
+#     v_params,
+#     c :: T
+# ) where T
+#     """ 
+#         Underlying implementation of discretized PDE operator given 
+#         diffusivity, reaction and velocity parameters.
+#     """
+#     gridpts = convert(Vector, gridpts);
+#     n = length(gridpts);
+#     h = gridpts[2] - gridpts[1];
+#     row_ind = Vector{Int64}();
+#     col_ind = Vector{Int64}();
+#     entry = Vector{Float64}();
+#     for i = 1:n
+#         # grid location
+#         x = gridpts[i];
+#         # advection velocity
+#         v_val = v_model(x, v_params);
+#         # compute coefficients
+#         # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
+#         a1 = (-v_val/2h-kappa/h^2);
+#         a2 = (c+2kappa/h^2);
+#         a3 = (v_val/2h-kappa/h^2);
+#         # store coefficients
+#         if i == 1
+#             # U_i 
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#             # U_i+1
+#             push!(row_ind, i);
+#             push!(col_ind, i+1);
+#             push!(entry, a1+a3);
+#         elseif i == n
+#             # U_i-1
+#             push!(row_ind, i);
+#             push!(col_ind, i-1);
+#             push!(entry, a1+a3);
+#             # U_i
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#         else
+#             # U_i-1
+#             push!(row_ind, i);
+#             push!(col_ind, i-1);
+#             push!(entry, a1);
+#             # U_i 
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#             # U_i+1
+#             push!(row_ind, i);
+#             push!(col_ind, i+1);
+#             push!(entry, a3);
+#         end
+#     end
+#     # create differential operator as a matrix
+#     L = sparse(row_ind, col_ind, entry);
+#     return L;
+# end
 
 ## Matrix derivatives with respect to PDE parameters
 function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
@@ -311,71 +311,71 @@ function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
     return L;
 end
 
-function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
-    gridpts, 
-    kappa :: T, 
-    v_model, 
-    v_params, 
-    c :: T
-) where T
-    """ 
-        Derivative of advection-diffusion-reaction model with respect to 
-        constant diffusivity `kappa`. 
+# function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
+#     gridpts, 
+#     kappa :: T, 
+#     v_model, 
+#     v_params, 
+#     c :: T
+# ) where T
+#     """ 
+#         Derivative of advection-diffusion-reaction model with respect to 
+#         constant diffusivity `kappa`. 
 
-        The matrix derivative is:
-            -u_xx
-    """
-    gridpts = convert(Vector, gridpts);
-    n = length(gridpts);
-    h = gridpts[2] - gridpts[1];
-    row_ind = Vector{Int64}();
-    col_ind = Vector{Int64}();
-    entry = Vector{Float64}();
+#         The matrix derivative is:
+#             -u_xx
+#     """
+#     gridpts = convert(Vector, gridpts);
+#     n = length(gridpts);
+#     h = gridpts[2] - gridpts[1];
+#     row_ind = Vector{Int64}();
+#     col_ind = Vector{Int64}();
+#     entry = Vector{Float64}();
 
-    # compute coefficients ∂kappa
-    # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-    a1 = -1/h^2;
-    a2 = 2/h^2;
-    a3 = -1/h^2;
-    for i = 1:n
-        # store coefficients
-        if i == 1
-            # U_i 
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-            # U_i+1
-            push!(row_ind, i);
-            push!(col_ind, i+1);
-            push!(entry, a1+a3);
-        elseif i == n
-            # U_i-1
-            push!(row_ind, i);
-            push!(col_ind, i-1);
-            push!(entry, a1+a3);
-            # U_i
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-        else
-            # U_i-1
-            push!(row_ind, i);
-            push!(col_ind, i-1);
-            push!(entry, a1);
-            # U_i 
-            push!(row_ind, i);
-            push!(col_ind, i);
-            push!(entry, a2);
-            # U_i+1
-            push!(row_ind, i);
-            push!(col_ind, i+1);
-            push!(entry, a3);
-        end
-    end
-    # create differential operator as a matrix
-    L = sparse(row_ind, col_ind, entry);
-    return L;
-end
+#     # compute coefficients ∂kappa
+#     # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
+#     a1 = -1/h^2;
+#     a2 = 2/h^2;
+#     a3 = -1/h^2;
+#     for i = 1:n
+#         # store coefficients
+#         if i == 1
+#             # U_i 
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#             # U_i+1
+#             push!(row_ind, i);
+#             push!(col_ind, i+1);
+#             push!(entry, a1+a3);
+#         elseif i == n
+#             # U_i-1
+#             push!(row_ind, i);
+#             push!(col_ind, i-1);
+#             push!(entry, a1+a3);
+#             # U_i
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#         else
+#             # U_i-1
+#             push!(row_ind, i);
+#             push!(col_ind, i-1);
+#             push!(entry, a1);
+#             # U_i 
+#             push!(row_ind, i);
+#             push!(col_ind, i);
+#             push!(entry, a2);
+#             # U_i+1
+#             push!(row_ind, i);
+#             push!(col_ind, i+1);
+#             push!(entry, a3);
+#         end
+#     end
+#     # create differential operator as a matrix
+#     L = sparse(row_ind, col_ind, entry);
+#     return L;
+# end
 
 
 function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
@@ -444,85 +444,85 @@ function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
     return Ldθ;
 end
 
-function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
-    gridpts, 
-    kappa :: T, 
-    v_model, 
-    v_model∂θ, 
-    v_params, 
-    c :: T
-) where T
-    """ 
-        Returns Jacobian of the finite difference 
-        matrix for 1d, in all parameters θ. 
+# function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
+#     gridpts, 
+#     kappa :: T, 
+#     v_model, 
+#     v_model∂θ, 
+#     v_params, 
+#     c :: T
+# ) where T
+#     """ 
+#         Returns Jacobian of the finite difference 
+#         matrix for 1d, in all parameters θ. 
 
-        The result is returned as an array of matrices.
+#         The result is returned as an array of matrices.
 
-        `v` is assumed to have form v(x, θ) where
-        θ are parameterization. 
+#         `v` is assumed to have form v(x, θ) where
+#         θ are parameterization. 
 
-    """
-    gridpts = convert(Vector, gridpts);
-    n = length(gridpts);
-    h = gridpts[2] - gridpts[1];
-    p = length(v_params);
-    Ldθ = Array{SparseMatrixCSC}(undef, p);
-    for pp = 1:p
-        #println("Parameter $pp")
-        row_ind = Vector{Int64}();
-        col_ind = Vector{Int64}();
-        entry = Vector{Float64}();
-        for i = 1:n
-            # grid location
-            x = gridpts[i];
-            # compute coefficients ∂v
-            # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
+#     """
+#     gridpts = convert(Vector, gridpts);
+#     n = length(gridpts);
+#     h = gridpts[2] - gridpts[1];
+#     p = length(v_params);
+#     Ldθ = Array{SparseMatrixCSC}(undef, p);
+#     for pp = 1:p
+#         #println("Parameter $pp")
+#         row_ind = Vector{Int64}();
+#         col_ind = Vector{Int64}();
+#         entry = Vector{Float64}();
+#         for i = 1:n
+#             # grid location
+#             x = gridpts[i];
+#             # compute coefficients ∂v
+#             # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
 
-            # take derivative with respect to θ
-            a1 = -ChebyshevVelocityModel∂θ(x, v_params)[pp] / (2h);
-            # a2 has no dependence on `v`
-            a2 = 0.0;
-            # a3 always has opposite signs as a1
-            a3 = -a1;
+#             # take derivative with respect to θ
+#             a1 = -ChebyshevVelocityModel∂θ(x, v_params)[pp] / (2h);
+#             # a2 has no dependence on `v`
+#             a2 = 0.0;
+#             # a3 always has opposite signs as a1
+#             a3 = -a1;
             
-            # store coefficients
-            if i == 1
-                # U_i 
-                push!(row_ind, i);
-                push!(col_ind, i);
-                push!(entry, a2);
-                # U_i+1
-                push!(row_ind, i);
-                push!(col_ind, i+1);
-                push!(entry, a1+a3);
-            elseif i == n
-                # U_i-1
-                push!(row_ind, i);
-                push!(col_ind, i-1);
-                push!(entry, a1+a3);
-                # U_i
-                push!(row_ind, i);
-                push!(col_ind, i);
-                push!(entry, a2);
-            else
-                # U_i-1
-                push!(row_ind, i);
-                push!(col_ind, i-1);
-                push!(entry, a1);
-                # U_i 
-                push!(row_ind, i);
-                push!(col_ind, i);
-                push!(entry, a2);
-                # U_i+1
-                push!(row_ind, i);
-                push!(col_ind, i+1);
-                push!(entry, a3);
-            end
-        end
-        Ldθ[pp] = sparse(row_ind, col_ind, entry);
-    end
-    return Ldθ;
-end
+#             # store coefficients
+#             if i == 1
+#                 # U_i 
+#                 push!(row_ind, i);
+#                 push!(col_ind, i);
+#                 push!(entry, a2);
+#                 # U_i+1
+#                 push!(row_ind, i);
+#                 push!(col_ind, i+1);
+#                 push!(entry, a1+a3);
+#             elseif i == n
+#                 # U_i-1
+#                 push!(row_ind, i);
+#                 push!(col_ind, i-1);
+#                 push!(entry, a1+a3);
+#                 # U_i
+#                 push!(row_ind, i);
+#                 push!(col_ind, i);
+#                 push!(entry, a2);
+#             else
+#                 # U_i-1
+#                 push!(row_ind, i);
+#                 push!(col_ind, i-1);
+#                 push!(entry, a1);
+#                 # U_i 
+#                 push!(row_ind, i);
+#                 push!(col_ind, i);
+#                 push!(entry, a2);
+#                 # U_i+1
+#                 push!(row_ind, i);
+#                 push!(col_ind, i+1);
+#                 push!(entry, a3);
+#             end
+#         end
+#         Ldθ[pp] = sparse(row_ind, col_ind, entry);
+#     end
+#     return Ldθ;
+# end
 
 function advection_diffusion_reaction_homogeneous_neumann1d_∂c(
     gridpts, 
@@ -834,7 +834,70 @@ function score∂c(
     return res;
 end
 
-## Solving MLE problem
+
+## solve MLE problem
+function solve!(prob :: MLEProblem1d)
+    # number of parameters
+    p = length(prob.v_model.theta);
+    # unpack lower and upper boundaries for optimization 
+    lower, upper = -4.0*ones(p), 4.0.*ones(p);
+    # initial parameters
+    theta_init = copy(prob.v_model.theta[:]);
+    # evaluate constant Matern kernel 
+    M_eval = M(prob);
+    function negloglike(theta)
+        # update the problem velocity parameters 
+        prob.v_model.theta[:] .= copy(theta);
+        # evaluate PDE covariance
+        L_eval = L(prob); 
+        K_eval = K(M_eval, L_eval, prob);
+        K_inv_u_eval = K_eval\prob.u_observed;
+        return -log_likelihood(
+            K_eval,
+            K_inv_u_eval,
+            prob.u_observed
+        );
+    end
+
+    # function negscore(theta)
+    #     # update the problem velocity parameters 
+    #     prob.v_model.theta[:] .= copy(theta);
+    #     # evaluate PDE covariance 
+    #     L_eval = L(prob);
+    #     K_eval = K(M_eval, L_eval, prob);
+    #     dLdv_eval = ∂L∂v(prob);
+    #     dLinvdv_eval = ∂Linv∂v(L_eval, dLdv_eval);
+    #     dKdv_eval = ∂K∂v(M_eval, L_eval, dLinvdv_eval, prob);
+    #     K_inv_u_eval = K_eval\prob.u_observed;
+    #     return -score∂v(
+    #         K_eval, dKdv_eval, K_inv_u_eval
+    #     );
+    # end
+
+    # optimize 
+    inner_optimizer = Optim.LBFGS();
+    res = optimize(negloglike,
+                lower,
+                upper,
+                theta_init, 
+                Fminbox(inner_optimizer),
+                Optim.Options(
+                    outer_iterations = 10000,
+                    iterations=500, 
+                    x_tol=-1e-8, f_tol=-1e-6,
+                    f_reltol=-1e-8, f_abstol=-1e-6,
+                    x_reltol=-1e-8, x_abstol=-1e-6,
+                    g_abstol = 1e-4,
+                    show_trace=true, 
+                    show_every=10, 
+                    time_limit=7200
+                ),
+                    inplace=false
+            );
+    return res;
+end
+
+
 function solve!(
     prob :: MLEProblem1d,
     param_constraints :: Matrix{Float64}
@@ -909,7 +972,7 @@ function solve!(
     _lower = param_constraints[:, 1];
     _upper = param_constraints[:, 2];
     # initialize optimization algorithm
-    _optimization_alg = Optim.BFGS();
+    _optimization_alg = Optim.LBFGS();
 
     # define function to be optimized
     _optimization_function = OnceDifferentiable(Optim.only_fg!(_fg!), _params_init);

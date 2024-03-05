@@ -5,6 +5,7 @@
 # - dealing with unwanted adjoints: https://discourse.julialang.org/t/best-practices-regarding-adjoint-when-should-it-be-used-instead-of-array-best-way-to-style-it-out/43525
 
 import LinearAlgebra: rank
+using BlockDiagonals
 
 # !!!!!! may want to stop using mutable struct, weird inaccuracies 
 # may occur when fields get mutated.
