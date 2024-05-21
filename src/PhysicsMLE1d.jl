@@ -847,7 +847,9 @@ function solve!(prob :: MLEProblem1d)
     M_eval = M(prob);
     function negloglike(theta)
         # update the problem velocity parameters 
-        prob.v_model.theta[:] .= copy(theta);
+        prob.v_model.theta[:] .= copy(theta); #this updating during optimization is 
+        # problematic, e.g. line search might also update the model. Should actually
+        # create a copy of the MLEproblem
         # evaluate PDE covariance
         L_eval = L(prob); 
         K_eval = K(M_eval, L_eval, prob);

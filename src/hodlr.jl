@@ -2180,6 +2180,27 @@ function hodlr_diag(A::hodlr)::Vector{Float64}
     return vcat(tmp...);
 end
 
+function hodlr_perturb_diagonal!(A :: hodlr, d :: Vector)
+    """
+        Adds a given vector to the diagonal of a HODLR matrix.
+        Diagonal is modified in-place.
+
+        Inputs:
+            A: (hodlr)
+                Target matrix to be modified 
+            d: (vector)
+                perturbation to diagonal of A 
+    """
+    max_level = A.max_level; 
+    block_size = size(A.leaves[1],1); 
+    # size of square matrix 
+    n = Int(block_size * (2 ^ max_level));
+    @assert length(d) == n
+    for i = 1:length(A.idx_tree[end])
+        A.leaves[i] .= A.leaves[i] .+ diagm(d[A.idx_tree[end][i]]);
+    end
+end
+
 function hodlr_rank_heatmap(A::Union{hodlr, hodlr_nonsymmetric})
     """Plot the rank heatmap of the given HODLR matrix.
 
