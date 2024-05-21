@@ -190,192 +190,119 @@ function advection_diffusion_reaction_homogeneous_neumann1d(
     return L;
 end
 
-# function advection_diffusion_reaction_homogeneous_neumann1d(
-#     gridpts, 
-#     kappa :: T, 
-#     v_model, 
-#     v_params,
-#     c :: T
-# ) where T
-#     """ 
-#         Underlying implementation of discretized PDE operator given 
-#         diffusivity, reaction and velocity parameters.
-#     """
-#     gridpts = convert(Vector, gridpts);
-#     n = length(gridpts);
-#     h = gridpts[2] - gridpts[1];
-#     row_ind = Vector{Int64}();
-#     col_ind = Vector{Int64}();
-#     entry = Vector{Float64}();
-#     for i = 1:n
-#         # grid location
-#         x = gridpts[i];
-#         # advection velocity
-#         v_val = v_model(x, v_params);
-#         # compute coefficients
-#         # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-#         a1 = (-v_val/2h-kappa/h^2);
-#         a2 = (c+2kappa/h^2);
-#         a3 = (v_val/2h-kappa/h^2);
-#         # store coefficients
-#         if i == 1
-#             # U_i 
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#             # U_i+1
-#             push!(row_ind, i);
-#             push!(col_ind, i+1);
-#             push!(entry, a1+a3);
-#         elseif i == n
-#             # U_i-1
-#             push!(row_ind, i);
-#             push!(col_ind, i-1);
-#             push!(entry, a1+a3);
-#             # U_i
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#         else
-#             # U_i-1
-#             push!(row_ind, i);
-#             push!(col_ind, i-1);
-#             push!(entry, a1);
-#             # U_i 
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#             # U_i+1
-#             push!(row_ind, i);
-#             push!(col_ind, i+1);
-#             push!(entry, a3);
-#         end
-#     end
-#     # create differential operator as a matrix
-#     L = sparse(row_ind, col_ind, entry);
-#     return L;
-# end
+function advection_diffusion_reaction_periodic_boundary1d(
+    gridpts::Vector{T}, 
+    kappa::T, 
+    v_model::Function, 
+    c::T
+) where T <: AbstractFloat
+    """ 
+    Underlying implementation of discretized PDE operator given 
+    diffusivity, reaction, and velocity parameters with periodic boundary conditions.
+    """
+    n = length(gridpts)
+    h = gridpts[2] - gridpts[1]
+    row_ind = Vector{Int64}()
+    col_ind = Vector{Int64}()
+    entry = Vector{Float64}()
+
+    for i in 1:n
+        # grid location
+        x = gridpts[i]
+        # advection velocity
+        v_val = v_model(x)
+
+        # Compute indices for neighboring grid points
+        im1 = i == 1 ? n : i - 1  # Neighbor to the left
+        ip1 = i == n ? 1 : i + 1  # Neighbor to the right
+
+        # Compute coefficients
+        a1 = kappa / h^2
+        a2 = -2kappa / h^2 + v_val / (2h) + c
+        a3 = kappa / h^2 + v_val / (2h)
+
+        # Store coefficients
+        push!(row_ind, i)
+        push!(col_ind, im1)
+        push!(entry, a1)
+
+        push!(row_ind, i)
+        push!(col_ind, i)
+        push!(entry, a2)
+
+        push!(row_ind, i)
+        push!(col_ind, ip1)
+        push!(entry, a3)
+    end
+
+    # Create differential operator as a matrix
+    L = sparse(row_ind, col_ind, entry)
+    return L
+end
+
 
 ## Matrix derivatives with respect to PDE parameters
 function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
-    gridpts
-)
+    gridpts :: Any, 
+    kappa :: T, 
+    v_model :: Function, 
+    c :: T
+) where T <: AbstractFloat
+    """ 
+        Compute the derivative of the discretized PDE operator with respect to kappa
+        given diffusivity, reaction, and velocity parameters with homogeneous Neumann boundary conditions.
+    """
     gridpts = convert(Vector, gridpts);
     n = length(gridpts);
     h = gridpts[2] - gridpts[1];
     row_ind = Vector{Int64}();
     col_ind = Vector{Int64}();
     entry = Vector{Float64}();
-    # compute coefficients ∂kappa
-    # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-    a1 = -1/h^2;
-    a2 = 2/h^2;
-    a3 = -1/h^2;
-    for i = 1:n
+    
+    for i in 1:n
+        # grid location
+        x = gridpts[i];
+        # advection velocity
+        v_val = v_model(x);
+        
+        # compute coefficients
+        a1 = -1/h^2;
+        a2 = 2/h^2;
+        a3 = -1/h^2;
+        
         # store coefficients
         if i == 1
-            # U_i 
             push!(row_ind, i);
             push!(col_ind, i);
             push!(entry, a2);
-            # U_i+1
             push!(row_ind, i);
             push!(col_ind, i+1);
             push!(entry, a1+a3);
         elseif i == n
-            # U_i-1
             push!(row_ind, i);
             push!(col_ind, i-1);
             push!(entry, a1+a3);
-            # U_i
             push!(row_ind, i);
             push!(col_ind, i);
             push!(entry, a2);
         else
-            # U_i-1
             push!(row_ind, i);
             push!(col_ind, i-1);
             push!(entry, a1);
-            # U_i 
             push!(row_ind, i);
             push!(col_ind, i);
             push!(entry, a2);
-            # U_i+1
             push!(row_ind, i);
             push!(col_ind, i+1);
             push!(entry, a3);
         end
     end
+    
     # create differential operator as a matrix
-    L = sparse(row_ind, col_ind, entry);
-    return L;
+    dL_dkappa = sparse(row_ind, col_ind, entry);
+    return dL_dkappa;
 end
 
-# function advection_diffusion_reaction_homogeneous_neumann1d_∂kappa(
-#     gridpts, 
-#     kappa :: T, 
-#     v_model, 
-#     v_params, 
-#     c :: T
-# ) where T
-#     """ 
-#         Derivative of advection-diffusion-reaction model with respect to 
-#         constant diffusivity `kappa`. 
-
-#         The matrix derivative is:
-#             -u_xx
-#     """
-#     gridpts = convert(Vector, gridpts);
-#     n = length(gridpts);
-#     h = gridpts[2] - gridpts[1];
-#     row_ind = Vector{Int64}();
-#     col_ind = Vector{Int64}();
-#     entry = Vector{Float64}();
-
-#     # compute coefficients ∂kappa
-#     # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-#     a1 = -1/h^2;
-#     a2 = 2/h^2;
-#     a3 = -1/h^2;
-#     for i = 1:n
-#         # store coefficients
-#         if i == 1
-#             # U_i 
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#             # U_i+1
-#             push!(row_ind, i);
-#             push!(col_ind, i+1);
-#             push!(entry, a1+a3);
-#         elseif i == n
-#             # U_i-1
-#             push!(row_ind, i);
-#             push!(col_ind, i-1);
-#             push!(entry, a1+a3);
-#             # U_i
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#         else
-#             # U_i-1
-#             push!(row_ind, i);
-#             push!(col_ind, i-1);
-#             push!(entry, a1);
-#             # U_i 
-#             push!(row_ind, i);
-#             push!(col_ind, i);
-#             push!(entry, a2);
-#             # U_i+1
-#             push!(row_ind, i);
-#             push!(col_ind, i+1);
-#             push!(entry, a3);
-#         end
-#     end
-#     # create differential operator as a matrix
-#     L = sparse(row_ind, col_ind, entry);
-#     return L;
-# end
 
 
 function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
@@ -443,86 +370,6 @@ function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
     end
     return Ldθ;
 end
-
-# function advection_diffusion_reaction_homogeneous_neumann1d_∂v(
-#     gridpts, 
-#     kappa :: T, 
-#     v_model, 
-#     v_model∂θ, 
-#     v_params, 
-#     c :: T
-# ) where T
-#     """ 
-#         Returns Jacobian of the finite difference 
-#         matrix for 1d, in all parameters θ. 
-
-#         The result is returned as an array of matrices.
-
-#         `v` is assumed to have form v(x, θ) where
-#         θ are parameterization. 
-
-#     """
-#     gridpts = convert(Vector, gridpts);
-#     n = length(gridpts);
-#     h = gridpts[2] - gridpts[1];
-#     p = length(v_params);
-#     Ldθ = Array{SparseMatrixCSC}(undef, p);
-#     for pp = 1:p
-#         #println("Parameter $pp")
-#         row_ind = Vector{Int64}();
-#         col_ind = Vector{Int64}();
-#         entry = Vector{Float64}();
-#         for i = 1:n
-#             # grid location
-#             x = gridpts[i];
-#             # compute coefficients ∂v
-#             # form: a1U_i-1 + a2U_i + a3U_i+1 = f_i
-
-#             # take derivative with respect to θ
-#             a1 = -ChebyshevVelocityModel∂θ(x, v_params)[pp] / (2h);
-#             # a2 has no dependence on `v`
-#             a2 = 0.0;
-#             # a3 always has opposite signs as a1
-#             a3 = -a1;
-            
-#             # store coefficients
-#             if i == 1
-#                 # U_i 
-#                 push!(row_ind, i);
-#                 push!(col_ind, i);
-#                 push!(entry, a2);
-#                 # U_i+1
-#                 push!(row_ind, i);
-#                 push!(col_ind, i+1);
-#                 push!(entry, a1+a3);
-#             elseif i == n
-#                 # U_i-1
-#                 push!(row_ind, i);
-#                 push!(col_ind, i-1);
-#                 push!(entry, a1+a3);
-#                 # U_i
-#                 push!(row_ind, i);
-#                 push!(col_ind, i);
-#                 push!(entry, a2);
-#             else
-#                 # U_i-1
-#                 push!(row_ind, i);
-#                 push!(col_ind, i-1);
-#                 push!(entry, a1);
-#                 # U_i 
-#                 push!(row_ind, i);
-#                 push!(col_ind, i);
-#                 push!(entry, a2);
-#                 # U_i+1
-#                 push!(row_ind, i);
-#                 push!(col_ind, i+1);
-#                 push!(entry, a3);
-#             end
-#         end
-#         Ldθ[pp] = sparse(row_ind, col_ind, entry);
-#     end
-#     return Ldθ;
-# end
 
 function advection_diffusion_reaction_homogeneous_neumann1d_∂c(
     gridpts, 
