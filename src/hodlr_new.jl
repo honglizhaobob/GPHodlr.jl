@@ -75,6 +75,12 @@ struct hodlr_fact
     # all leaf and Woodbury blocks inside the algebra timer.
     leaf_factors::Vector{HODLRDenseLU}
     woodbury_factors::Vector{Vector{HODLRDenseLU}}
+    # The corresponding factors for `hodlr_fact_transpose`.  Keeping these in
+    # the same object is important: transposing a factorization must not
+    # refactor every leaf and every small Woodbury core on each inverse-product
+    # evaluation.
+    transposed_leaf_factors::Vector{HODLRDenseLU}
+    transposed_woodbury_factors::Vector{Vector{HODLRDenseLU}}
     logabsdet_value::Float64
     logabsdet_sign::Float64
 end
@@ -84,6 +90,44 @@ function _as_factor_levels(levels, max_level::Integer)
     return [Vector{Matrix{Float64}}(level) for level in levels]
 end
 
+function _build_woodbury_factors(U, V, max_level::Integer)
+    factors = Vector{Vector{HODLRDenseLU}}(undef, Int(max_level))
+    for level = 1:Int(max_level)
+        @assert length(U[level]) == length(V[level])
+        level_factors = Vector{HODLRDenseLU}(undef, length(U[level]))
+        for block = eachindex(U[level])
+            U_block = U[level][block]
+            V_block = V[level][block]
+            rank_block = size(U_block, 2)
+            @assert size(V_block, 2) == rank_block
+
+            core = Matrix{Float64}(I, rank_block, rank_block)
+            mul!(core, transpose(V_block), U_block, 1.0, 1.0)
+            level_factors[block] = lu(core; check=true)
+        end
+        factors[level] = level_factors
+    end
+    return factors
+end
+
+function _logabsdet_factors(leaf_factors, woodbury_factors)
+    value = 0.0
+    sign = 1.0
+    for factor in leaf_factors
+        value_i, sign_i = LinearAlgebra.logabsdet(factor)
+        value += value_i
+        sign *= Float64(sign_i)
+    end
+    for level_factors in woodbury_factors
+        for factor in level_factors
+            value_i, sign_i = LinearAlgebra.logabsdet(factor)
+            value += value_i
+            sign *= Float64(sign_i)
+        end
+    end
+    return value, sign
+end
+
 function _build_hodlr_fact(
     max_level::Integer,
     leaves,
@@ -91,6 +135,9 @@ function _build_hodlr_fact(
     V,
     idx_tree;
     leaf_factors=nothing,
+    woodbury_factors=nothing,
+    transposed_leaf_factors=nothing,
+    transposed_woodbury_factors=nothing,
 )
     max_level_int = Int(max_level)
     leaves_typed = Vector{Matrix{Float64}}(leaves)
@@ -106,43 +153,26 @@ function _build_hodlr_fact(
         Vector{HODLRDenseLU}(leaf_factors)
     end
 
-    cached_woodbury_factors =
-        Vector{Vector{HODLRDenseLU}}(undef, max_level_int)
-    logabsdet_value = 0.0
-    logabsdet_sign = 1.0
+    cached_woodbury_factors = isnothing(woodbury_factors) ?
+        _build_woodbury_factors(U_typed, V_typed, max_level_int) :
+        [Vector{HODLRDenseLU}(level) for level in woodbury_factors]
 
-    for (i, leaf_factor) in enumerate(cached_leaf_factors)
-        value_i, sign_i = LinearAlgebra.logabsdet(leaf_factor)
-        logabsdet_value += value_i
-        logabsdet_sign *= Float64(sign_i)
-        if sign_i < 0
-            @warn "Negative determinant encountered in leaf $(i); using log(abs(det))."
+    cached_transposed_leaf_factors =
+        if isnothing(transposed_leaf_factors)
+            HODLRDenseLU[lu(transpose(leaf); check=true) for leaf in leaves_typed]
+        else
+            @assert length(transposed_leaf_factors) == length(leaves_typed)
+            Vector{HODLRDenseLU}(transposed_leaf_factors)
         end
-    end
+    cached_transposed_woodbury_factors =
+        isnothing(transposed_woodbury_factors) ?
+        _build_woodbury_factors(V_typed, U_typed, max_level_int) :
+        [Vector{HODLRDenseLU}(level) for level in transposed_woodbury_factors]
 
-    for level = 1:max_level_int
-        @assert length(U_typed[level]) == length(V_typed[level])
-        level_factors = Vector{HODLRDenseLU}(undef, length(U_typed[level]))
-        for block = eachindex(U_typed[level])
-            U_block = U_typed[level][block]
-            V_block = V_typed[level][block]
-            rank_block = size(U_block, 2)
-            @assert size(V_block, 2) == rank_block
-
-            woodbury_matrix = Matrix{Float64}(I, rank_block, rank_block)
-            mul!(woodbury_matrix, transpose(V_block), U_block, 1.0, 1.0)
-            woodbury_factor = lu(woodbury_matrix; check=true)
-            level_factors[block] = woodbury_factor
-
-            value_i, sign_i = LinearAlgebra.logabsdet(woodbury_factor)
-            logabsdet_value += value_i
-            logabsdet_sign *= Float64(sign_i)
-            if sign_i < 0
-                @warn "Negative determinant encountered in HODLR update at level $(level), block $(block); using log(abs(det))."
-            end
-        end
-        cached_woodbury_factors[level] = level_factors
-    end
+    logabsdet_value, logabsdet_sign = _logabsdet_factors(
+        cached_leaf_factors,
+        cached_woodbury_factors,
+    )
 
     return hodlr_fact(
         max_level_int,
@@ -152,6 +182,8 @@ function _build_hodlr_fact(
         Vector{Any}(idx_tree),
         cached_leaf_factors,
         cached_woodbury_factors,
+        cached_transposed_leaf_factors,
+        cached_transposed_woodbury_factors,
         logabsdet_value,
         logabsdet_sign,
     )
@@ -1150,16 +1182,23 @@ function hodlr_fact_transpose(A :: hodlr_fact)
 
         Note: A must be symmetric for this to be valid.
     """
-    # Build this once per outer factorization and reuse it for every derivative.
     # The leaves are explicitly transposed to preserve the previous behavior
     # even when construction roundoff makes them only approximately symmetric.
+    # All decompositions are already present in `A`; this is only a cheap
+    # representation change and must not call `lu`.
     transposed_leaves = [Matrix(transpose(leaf)) for leaf in A.leaves]
-    return _build_hodlr_fact(
+    return hodlr_fact(
         A.max_level,
         transposed_leaves,
         A.V,
         A.U,
         A.idx_tree,
+        A.transposed_leaf_factors,
+        A.transposed_woodbury_factors,
+        A.leaf_factors,
+        A.woodbury_factors,
+        A.logabsdet_value,
+        A.logabsdet_sign,
     )
 end
 
