@@ -6,14 +6,15 @@ if !isdefined(@__MODULE__, :LandauChebyshevKappaMLE)
 end
 using .LandauChebyshevKappaMLE
 
-# Dependencies used internally by the supplied hodlr.jl.
+# Dependencies used internally by the cached hodlr_new.jl implementation.
 include("../../src/dyadic_idx.jl")
 include("../../src/rsvd.jl")
-include("../../src/hodlr.jl")
+include("../../src/hodlr_new.jl")
 
 """
-Store the HODLR approximation of the observation covariance and its one-way
-factorization.
+Store the HODLR approximation of the observation covariance, its one-way
+factorization, and the cached transposed factorization used by inverse-product
+trace evaluations.
 
 Only
 
@@ -26,6 +27,7 @@ implicit mean, and `dKu/dtheta[j]` are constructed in
 struct NativeSigmaHODLRFactor{TH, TF}
     matrix_hodlr::TH
     factor_hodlr::TF
+    transposed_factor_hodlr::TF
 end
 
 function _check_hodlr_partition(n::Int, max_level::Int)
@@ -110,9 +112,11 @@ function _factorize_native_sigma(
         oversampling,
         seed,
     )
+    factor_hodlr = hodlr_factorize(Sigma_hodlr)
     return NativeSigmaHODLRFactor(
         Sigma_hodlr,
-        hodlr_factorize(Sigma_hodlr),
+        factor_hodlr,
+        hodlr_fact_transpose(factor_hodlr),
     )
 end
 
@@ -145,8 +149,8 @@ function _trace_inverse_native_derivative(
     wrapper::NativeSigmaHODLRFactor,
     derivative_hodlr,
 )
-    inverse_product = hodlr_invmult(
-        wrapper.factor_hodlr,
+    inverse_product = hodlr_invmult_transposed(
+        wrapper.transposed_factor_hodlr,
         derivative_hodlr,
     )
     return Float64(hodlr_tr(inverse_product))
@@ -158,8 +162,8 @@ end
 Create the native HODLR observation-covariance backend. For every Chebyshev
 coefficient, `dSigma/dtheta[j]` is compressed as a symmetric (generally
 indefinite) HODLR matrix. With `trace_mode=:exact`, the inverse-product and
-trace are evaluated by `hodlr_invmult` and `hodlr_tr`; the dense trace formula
-is not used by this backend.
+trace are evaluated by `hodlr_invmult_transposed` and `hodlr_tr`; the dense
+trace formula is not used by this backend.
 
 Keyword defaults match the earlier Landau backend:
 

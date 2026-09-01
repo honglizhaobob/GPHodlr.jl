@@ -8,10 +8,12 @@ include("utils/landau_sample_heterogeneous_kappa.jl")
 include("native_hodlr_backend_chebyshev_kappa_ad.jl")
 using .LandauChebyshevKappaMLE
 
-include("general_positive_kappa.jl")
+include("fixed_matern_kappa_landau_observations.jl")
+using .FixedMaternKappaLandauData
 
-const BACKEND_MODE = :hodlr  # Set to :exact or :hodlr.
-const TRUE_KAPPA_FUNCTION = GeneralPositiveKappa.kappa_true
+const BACKEND_MODE = :exact  # Set to :exact or :hodlr.
+const TRUE_LANDAU_OBSERVATIONS_PATH =
+    FixedMaternKappaLandauData.LANDAU_DATA_PATH
 
 @eval LandauChebyshevKappaMLE begin
     mutable struct KappaAlgebraOptimizerTiming
@@ -253,7 +255,7 @@ end
 const A_TRUE = 2.0
 const B_TRUE = 3.0
 const CHEBYSHEV_TOTAL_DEGREE = 5
-const CHEBYSHEV_PROJECTION_GRID_SIZE = 32
+const CHEBYSHEV_PROJECTION_GRID_SIZE = FixedMaternKappaLandauData.MAX_NX
 const CHEBYSHEV_DOMAIN = (0.0, 1.0, 0.0, 1.0)
 const BASIS_PAIRS = chebyshev_basis_pairs(CHEBYSHEV_TOTAL_DEGREE)
 const BASIS_PAIRS_MATRIX = hcat(first.(BASIS_PAIRS), last.(BASIS_PAIRS))
@@ -309,6 +311,10 @@ function project_true_log_kappa()
         CHEBYSHEV_PROJECTION_GRID_SIZE,
         CHEBYSHEV_PROJECTION_GRID_SIZE,
     )
+    true_log_kappa = log.(vec(FixedMaternKappaLandauData.kappa_grid(
+        CHEBYSHEV_PROJECTION_GRID_SIZE,
+        CHEBYSHEV_PROJECTION_GRID_SIZE,
+    )))
     sample_count = length(xgrid) * length(ygrid)
     design = Matrix{Float64}(undef, sample_count, NTHETA)
     target = Vector{Float64}(undef, sample_count)
@@ -323,7 +329,7 @@ function project_true_log_kappa()
         for (column, (i, j)) in pairs(BASIS_PAIRS)
             design[row, column] = Tx[i + 1] * Ty[j + 1]
         end
-        target[row] = log(TRUE_KAPPA_FUNCTION(x, y))
+        target[row] = true_log_kappa[row]
     end
     return design \ target
 end
@@ -357,30 +363,31 @@ const OBSERVATION_NOISE_STD = 0.01
 const COVARIANCE_JITTER = 1.0e-8
 const FACE_AVERAGE = :harmonic
 
-const M_VALUES = 2 .^ (8:12)
+const M_VALUES = [2^4]
 const PRODUCTION_SEED = 1234
-const PRODUCTION_NX = 32
-const PRODUCTION_NY = PRODUCTION_NX
+# Any divisor of FixedMaternKappaLandauData.MAX_NX gives a nested subset of the
+# fixed maximum-grid realization. For example, use 2^3 for an 8 x 8 solve.
+const PRODUCTION_GRID_SIZES = 2 .^ (3:6)
 
 const LOWER_THETA = -1.0
 const UPPER_THETA = 1.0
-const OPTIMIZER_MAX_ITERATIONS = 50
-const OPTIMIZER_TIME_LIMIT_SECONDS = 600.0
+const OPTIMIZER_MAX_ITERATIONS = 1000
+const OPTIMIZER_TIME_LIMIT_SECONDS = 3600.0
 const BOX_OUTER_MAX_ITERATIONS = 20
-const OPTIMIZER_G_TOL = 1.0e-4
+const OPTIMIZER_G_TOL = 1.0e-6
 const OPTIMIZER_F_TOL = 1.0e-8
 const OPTIMIZER_X_TOL = 1.0e-8
 const LBFGS_MEMORY = 10
 
-const HODLR_MAX_LEVEL = 2
-const HODLR_RANK_DIVISOR = 16
-const HODLR_OVERSAMPLING = 10
+const HODLR_MAX_LEVEL = 4
+const HODLR_RANK_DIVISOR = 32
+const HODLR_OVERSAMPLING = 2
 const HODLR_RANDOM_SEED = 123456
 # Large enough that rank + oversampling fits in the finest HODLR leaves.
 const WARMUP_NX = 16
 const WARMUP_NY = 16
 
-function generate_data(
+function load_fixed_data(
     xgrid::AbstractVector,
     ygrid::AbstractVector,
     M::Int;
@@ -388,27 +395,19 @@ function generate_data(
     progress::Bool,
 )
     nx, ny = length(xgrid), length(ygrid)
-    initial_solution = fill(sqrt(A_TRUE / B_TRUE), nx, ny)
-    return generate_landau_observations(
-        xgrid,
-        ygrid,
+    progress && println(
+        "Loading fixed nested Landau observations for grid ",
+        nx,
+        " x ",
+        ny,
+        " and M = ",
         M,
-        NU_PHI,
-        ELL_PHI,
-        SIGMA_PHI,
-        A_TRUE,
-        B_TRUE,
-        TRUE_KAPPA_FUNCTION;
-        mean_fn=rbf_mean_phi,
-        rng=MersenneTwister(seed),
-        periodic_kernel=false,
-        observation_noise_std=OBSERVATION_NOISE_STD,
-        u0=initial_solution,
-        warm_start=false,
-        solver_face_average=FACE_AVERAGE,
-        solver_verbose=false,
-        progress=progress,
-        return_forcing=false,
+    )
+    return FixedMaternKappaLandauData.load_landau_subset(
+        nx,
+        ny,
+        M;
+        use_noisy_observations=true,
     )
 end
 
@@ -631,7 +630,28 @@ function common_export_dictionary(data, nx::Int, ny::Int)
         "ygrid" => data.ygrid,
         "nx" => nx,
         "ny" => ny,
+        "production_grid_sizes" => collect(PRODUCTION_GRID_SIZES),
         "production_seed" => PRODUCTION_SEED,
+        "kappa_realization" => "fixed Matern GP log-kappa",
+        "kappa_source_path" => TRUE_LANDAU_OBSERVATIONS_PATH,
+        "landau_observations_path" => TRUE_LANDAU_OBSERVATIONS_PATH,
+        "landau_observation_source" => data.observation_source,
+        "landau_observations_max_nx" => data.max_nx,
+        "landau_observations_max_ny" => data.max_ny,
+        "landau_observations_max_realizations" => data.max_M,
+        "landau_nested_spatial_indices" => data.spatial_indices,
+        "landau_nested_x_indices" => data.x_indices,
+        "landau_nested_y_indices" => data.y_indices,
+        "landau_generation_seed" => data.generation_seed,
+        "landau_observation_noise_seed" => data.observation_noise_seed,
+        "kappa_realization_seed" => FixedMaternKappaLandauData.GP_SEED,
+        "kappa_realization_max_nx" => FixedMaternKappaLandauData.MAX_NX,
+        "kappa_realization_max_ny" => FixedMaternKappaLandauData.MAX_NY,
+        "kappa_log_mean" => FixedMaternKappaLandauData.LOG_KAPPA_MEAN,
+        "kappa_log_std" => FixedMaternKappaLandauData.LOG_KAPPA_STD,
+        "kappa_matern_nu" => FixedMaternKappaLandauData.MATERN_NU,
+        "kappa_matern_length_scale" =>
+            FixedMaternKappaLandauData.MATERN_LENGTH_SCALE,
         "hodlr_max_level" => HODLR_MAX_LEVEL,
         "hodlr_rank_divisor" => HODLR_RANK_DIVISOR,
         "hodlr_oversampling" => HODLR_OVERSAMPLING,
@@ -766,7 +786,7 @@ function warm_up_timing_path()
     backend_label, backend = selected_backend()
     println("\nWarming up the $backend_label path (not reported) ...")
     xgrid, ygrid = periodic_grid(WARMUP_NX, WARMUP_NY)
-    data = generate_data(
+    data = load_fixed_data(
         xgrid,
         ygrid,
         16;
@@ -798,14 +818,27 @@ function warm_up_timing_path()
     return nothing
 end
 
-function run_production_fits(output_dir::AbstractString)
+function run_production_fits(
+    output_root::AbstractString,
+    nx::Int,
+    ny::Int,
+)
     backend_label, _ = selected_backend()
-    nx, ny = PRODUCTION_NX, PRODUCTION_NY
     xgrid, ygrid = periodic_grid(nx, ny)
     M_max = maximum(M_VALUES)
+    output_dir = joinpath(output_root, @sprintf("grid_%04dx%04d", nx, ny))
+    mkpath(output_dir)
 
-    println("\nGenerating one nested heterogeneous-kappa ensemble with M_max=$M_max ...")
-    data = generate_data(
+    println(
+        "\nLoading fixed nested heterogeneous-kappa ensemble for grid ",
+        nx,
+        " x ",
+        ny,
+        " with M_max=",
+        M_max,
+        " ...",
+    )
+    data = load_fixed_data(
         xgrid,
         ygrid,
         M_max;
@@ -898,14 +931,17 @@ function run_production_fits(output_dir::AbstractString)
     println("Summary: ", joinpath(output_dir, summary_filename))
     return (
         M_values=collect(M_VALUES),
+        nx=nx,
+        ny=ny,
         backend=BACKEND_MODE,
         results=storage,
     )
 end
 
 function main()
-    output_dir = "landau_kappa_chebyshev_ad_algebra_optimizer_timing_results"
-    mkpath(output_dir)
+    output_root =
+        "landau_kappa_chebyshev_ad_matern_kappa_algebra_optimizer_timing_results"
+    mkpath(output_root)
     selected_backend()
 
     if "--no-warmup" in ARGS
@@ -915,7 +951,14 @@ function main()
     else
         warm_up_timing_path()
     end
-    return run_production_fits(output_dir)
+    results = []
+    for grid_size in PRODUCTION_GRID_SIZES
+        push!(
+            results,
+            run_production_fits(output_root, Int(grid_size), Int(grid_size)),
+        )
+    end
+    return results
 end
 
 main()
